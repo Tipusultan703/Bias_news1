@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bias-Free News Translator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 700px;
+            margin: auto;
+        }
+        h2, h3 {
+            text-align: center;
+        }
+        textarea, input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: blue;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-top: 5px;
+        }
+        .text-box {
+            padding: 10px;
+            border: 1px solid #ccc;
+            margin-top: 10px;
+            white-space: pre-line;
+        }
+        #result, #source-result {
+            display: none;
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+        .error-message {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h2>Bias-Free News Translator</h2>
+
+    <h3>Paste or type news text here...</h3>
+    <textarea id="newsText" rows="5"></textarea>
+    <button onclick="analyzeNews()">Analyze</button>
+
+    <div id="result">
+        <h3>Bias Score: <span id="biasScore">Loading...</span></h3>
+        
+        <h3>Original Article</h3>
+        <div id="originalText" class="text-box"></div>
+
+        <h3>Rewritten Article</h3>
+        <div id="rewrittenText" class="text-box" style="display:none;"></div>
+
+        <h3>Bias Redlining</h3>
+        <div id="redlinedText" class="text-box"></div>
+
+        <button onclick="toggleView()">Toggle View</button>
+        <button onclick="flagArticle()" style="background: red;">Flag as Incorrect</button>
+    </div>
+
+    <h3>Bias Score History</h3>
+    <canvas id="biasChart"></canvas>
+
+    <h3>Source Verification</h3>
+    <input type="text" id="newsUrl" placeholder="Enter news website URL">
+    <button onclick="checkSource()">Check Source</button>
+    <div id="source-result">
+        <h3>Bias Rating: <span id="sourceBiasScore">Loading...</span></h3>
+    </div>
+
+    <script>
+        let biasChartInstance = null;
+        let isOriginalVisible = true;
+
+        function analyzeNews() {
+            let text = document.getElementById("newsText").value.trim();
+            if (!text) return alert("Please enter news text.");
+
+            fetch("http://127.0.0.1:5000/analyze", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: text })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert("Error: " + data.error);
+                    return;
+                }
+
+                let biasScore = data.bias_score || 0;
+                let rewrittenText = data.rewritten || "No rewritten text available.";
+                let redlinedText = data.redlined_text || [];
+
+                document.getElementById("biasScore").innerText = biasScore.toFixed(2);
+                document.getElementById("originalText").innerText = text;
+                document.getElementById("rewrittenText").innerText = rewrittenText;
+                document.getElementById("redlinedText").innerHTML = formatRedlinedText(redlinedText);
+                document.getElementById("result").style.display = "block";
+
+                updateBiasHistory(text, biasScore);
+            })
+            .catch(error => {
+                console.error("Error analyzing news:", error);
+                alert("Failed to analyze text. Please try again.");
+            });
+        }
+
+        function formatRedlinedText(redlinedArray) {
+            if (!Array.isArray(redlinedArray)) return redlinedArray;
+
+            return redlinedArray.map(change => {
+                if (change.startsWith("❌")) {
+                    return `<span style="color: red;">${change.replace("❌", "")}</span>`;
+                } else if (change.startsWith("✅")) {
+                    return `<span style="color: green;">${change.replace("✅", "")}</span>`;
+                }
+                return change;
+            }).join("<br>");
+        }
+
+        function checkSource() {
+            let url = document.getElementById("newsUrl").value.trim();
+            if (!url) return alert("Please enter a URL.");
+
+            fetch("http://127.0.0.1:5000/source_check", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url: url })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("sourceBiasScore").innerText = data.source_rating || "Unknown";
+                document.getElementById("source-result").style.display = "block";
+            })
+            .catch(error => {
+                console.error("Error checking source:", error);
+                alert("Failed to check source. Please try again.");
+            });
+        }
+
+        function updateBiasHistory(text, score) {
+            let biasHistory = JSON.parse(localStorage.getItem("biasHistory")) || [];
+            biasHistory.push({ text: text.substring(0, 50), score: score });
+            localStorage.setItem("biasHistory", JSON.stringify(biasHistory));
+            updateBiasChart(biasHistory);
+        }
+
+        function updateBiasChart(biasHistory) {
+            let ctx = document.getElementById("biasChart").getContext("2d");
+            let labels = biasHistory.map(item => item.text);
+            let scores = biasHistory.map(item => item.score);
+
+            if (biasChartInstance) {
+                biasChartInstance.destroy();
+            }
+
+            biasChartInstance = new Chart(ctx, {
+                type: "bar",
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: "Bias Score",
+                        data: scores,
+                        backgroundColor: "blue",
+                    }]
+                }
+            });
+        }
+
+        function toggleView() {
+            let original = document.getElementById("originalText");
+            let rewritten = document.getElementById("rewrittenText");
+            original.style.display = original.style.display === "none" ? "block" : "none";
+            rewritten.style.display = rewritten.style.display === "none" ? "block" : "none";
+        }
+
+        function flagArticle() {
+            alert("Article flagged for review.");
+        }
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
